@@ -13,14 +13,16 @@
 # limitations under the License.
 
 import itertools
-from typing import Iterable, Tuple, Dict
+from typing import Iterable, Tuple, Dict, Any
 
 import networkx as nx
 
 import cirq
+from cirq._compat import deprecated
 
 
-def xmon_device_to_graph(device: cirq.google.XmonDevice) -> nx.Graph:
+@deprecated(deadline="v0.12", fix="use gridqubits_to_graph_device(device.qubits) instead")
+def xmon_device_to_graph(device: Any) -> nx.Graph:
     """Gets the graph of an XmonDevice."""
     return gridqubits_to_graph_device(device.qubits)
 
@@ -28,7 +30,7 @@ def xmon_device_to_graph(device: cirq.google.XmonDevice) -> nx.Graph:
 def get_linear_device_graph(n_qubits: int) -> nx.Graph:
     """Gets the graph of a linearly connected device."""
     qubits = cirq.LineQubit.range(n_qubits)
-    edges = [tuple(qubits[i:i + 2]) for i in range(n_qubits - 1)]
+    edges = [tuple(qubits[i : i + 2]) for i in range(n_qubits - 1)]
     return nx.Graph(edges)
 
 
@@ -41,16 +43,16 @@ def get_grid_device_graph(*args, **kwargs) -> nx.Graph:
 
 def gridqubits_to_graph_device(qubits: Iterable[cirq.GridQubit]):
     """Gets the graph of a set of grid qubits."""
-    return nx.Graph(pair for pair in itertools.combinations(qubits, 2)
-                    if _manhattan_distance(*pair) == 1)
+    return nx.Graph(
+        pair for pair in itertools.combinations(qubits, 2) if _manhattan_distance(*pair) == 1
+    )
 
 
 def _manhattan_distance(qubit1: cirq.GridQubit, qubit2: cirq.GridQubit) -> int:
     return abs(qubit1.row - qubit2.row) + abs(qubit1.col - qubit2.col)
 
 
-def nx_qubit_layout(graph: nx.Graph) \
-        -> Dict[cirq.Qid, Tuple[float, float]]:
+def nx_qubit_layout(graph: nx.Graph) -> Dict[cirq.Qid, Tuple[float, float]]:
     """Return a layout for a graph for nodes which are qubits.
 
     This can be used in place of nx.spring_layout or other networkx layouts.
@@ -62,7 +64,7 @@ def nx_qubit_layout(graph: nx.Graph) \
     >>> import matplotlib.pyplot as plt
     >>> # Clear plot state to prevent issues with pyplot dimensionality.
     >>> plt.clf()
-    >>> g = ccr.xmon_device_to_graph(cirq.google.Foxtail)
+    >>> g = ccr.gridqubits_to_graph_device(cirq.GridQubit.rect(4,5))
     >>> pos = ccr.nx_qubit_layout(g)
     >>> nx.draw_networkx(g, pos=pos)
 
@@ -78,9 +80,7 @@ def nx_qubit_layout(graph: nx.Graph) \
             pos[node] = (node.x, 0.5)
         else:
             if _node_to_i_cache is None:
-                _node_to_i_cache = {
-                    n: i for i, n in enumerate(sorted(graph.nodes))
-                }
+                _node_to_i_cache = {n: i for i, n in enumerate(sorted(graph.nodes))}
             # Position in a line according to sort order
             # Offset to avoid overlap with gridqubits
             pos[node] = (0.5, _node_to_i_cache[node] + 1)

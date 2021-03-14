@@ -76,7 +76,6 @@ changed_python_tests=$(git diff --name-only "${rev}" -- \
 )
 if git diff --name-only "${rev}" -- | grep "__init__\.py$" > /dev/null; then
   # Include global API tests when an __init__ file is touched.
-  changed_python_tests+=('rtd_docs/docs_coverage_test.py')
   changed_python_tests+=('cirq/protocols/json_serialization_test.py')
 fi
 if [ "${#changed_python_tests[@]}" -eq 0 ]; then
@@ -88,8 +87,7 @@ fi
 check/pytest "${changed_python_tests[@]}" \
     "${cov_changed_python_file_dirs[@]}" \
     --cov-report=annotate \
-    --cov-config=dev_tools/conf/.coveragerc \
-    --benchmark-skip
+    --cov-config=dev_tools/conf/.coveragerc
 pytest_result=$?
 
 # Analyze coverage files.

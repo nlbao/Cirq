@@ -2,7 +2,7 @@
 https://arxiv.org/abs/1811.12926.
 """
 
-from typing import Optional, List, cast, Callable, Dict, Tuple, Set, Union
+from typing import Optional, List, cast, Callable, Dict, Tuple, Set, Any
 from dataclasses import dataclass
 
 import numpy as np
@@ -11,13 +11,12 @@ import networkx as nx
 
 import cirq
 import cirq.contrib.routing as ccr
+from cirq._compat import deprecated_parameter
 
 
-def generate_model_circuit(num_qubits: int,
-                           depth: int,
-                           *,
-                           random_state: 'cirq.RANDOM_STATE_OR_SEED_LIKE' = None
-                          ) -> cirq.Circuit:
+def generate_model_circuit(
+    num_qubits: int, depth: int, *, random_state: 'cirq.RANDOM_STATE_OR_SEED_LIKE' = None
+) -> cirq.Circuit:
     """Generates a model circuit with the given number of qubits and depth.
 
     The generated circuit consists of `depth` layers of random qubit
@@ -46,14 +45,15 @@ def generate_model_circuit(num_qubits: int,
         # Decompose each SU(4) into CNOT + SU(2) and add to Ci
         for k in range(0, num_qubits - 1, 2):
             permuted_indices = [int(perm[k]), int(perm[k + 1])]
-            special_unitary = cirq.testing.random_special_unitary(
-                4, random_state=random_state)
+            special_unitary = cirq.testing.random_special_unitary(4, random_state=random_state)
 
             # Convert the decomposed unitary to Cirq operations and add them to
             # the circuit.
             circuit.append(
                 cirq.MatrixGate(special_unitary).on(
-                    qubits[permuted_indices[0]], qubits[permuted_indices[1]]))
+                    qubits[permuted_indices[0]], qubits[permuted_indices[1]]
+                )
+            )
 
     # Don't measure all of the qubits at the end of the circuit because we will
     # need to classically simulate it to compute its heavy set.
@@ -75,22 +75,18 @@ def compute_heavy_set(circuit: cirq.Circuit) -> List[int]:
     # Classically compute the probabilities of each output bit-string through
     # simulation.
     simulator = cirq.Simulator()
-    results = cast(cirq.StateVectorTrialResult,
-                   simulator.simulate(program=circuit))
+    results = cast(cirq.StateVectorTrialResult, simulator.simulate(program=circuit))
 
     # Compute the median probability of the output bit-strings. Note that heavy
     # output is defined in terms of probabilities, where our wave function is in
     # terms of amplitudes. We convert it by using the Born rule: squaring each
     # amplitude and taking their absolute value
-    median = np.median(np.abs(results.state_vector()**2))
+    median = np.median(np.abs(results.state_vector() ** 2))
 
     # The output wave function is a vector from the result value (big-endian) to
     # the probability of that bit-string. Return all of the bit-string
     # values that have a probability greater than the median.
-    return [
-        idx for idx, amp in enumerate(results.state_vector())
-        if np.abs(amp**2) > median
-    ]
+    return [idx for idx, amp in enumerate(results.state_vector()) if np.abs(amp ** 2) > median]
 
 
 @dataclass
@@ -100,11 +96,13 @@ class CompilationResult:
     parity_map: Dict[cirq.Qid, cirq.Qid]
 
 
-def sample_heavy_set(compilation_result: CompilationResult,
-                     heavy_set: List[int],
-                     *,
-                     repetitions=10_000,
-                     sampler: cirq.Sampler = cirq.Simulator()) -> float:
+def sample_heavy_set(
+    compilation_result: CompilationResult,
+    heavy_set: List[int],
+    *,
+    repetitions=10_000,
+    sampler: cirq.Sampler = cirq.Simulator(),
+) -> float:
     """Run a sampler over the given circuit and compute the percentage of its
        outputs that are in the heavy set.
 
@@ -142,14 +140,12 @@ def sample_heavy_set(compilation_result: CompilationResult,
     trial_result = sampler.run(program=circuit_copy, repetitions=repetitions)
 
     # Post-process the results, e.g. to handle error corrections.
-    results = process_results(mapping, compilation_result.parity_map,
-                              trial_result)
+    results = process_results(mapping, compilation_result.parity_map, trial_result)
 
     # Aggregate the results into bit-strings (since we are using individual
     # measurement gates).
 
-    results = results.agg(lambda meas: cirq.value.big_endian_bits_to_int(meas),
-                          axis=1)
+    results = results.agg(lambda meas: cirq.value.big_endian_bits_to_int(meas), axis=1)
     # Compute the number of outputs that are in the heavy set.
     num_in_heavy_set = np.sum(np.in1d(results, heavy_set))
 
@@ -157,9 +153,11 @@ def sample_heavy_set(compilation_result: CompilationResult,
     return num_in_heavy_set / len(results)
 
 
-def process_results(mapping: Dict[cirq.Qid, cirq.Qid],
-                    parity_mapping: Dict[cirq.Qid, cirq.Qid],
-                    trial_result: cirq.Result) -> pd.DataFrame:
+def process_results(
+    mapping: Dict[cirq.Qid, cirq.Qid],
+    parity_mapping: Dict[cirq.Qid, cirq.Qid],
+    trial_result: cirq.Result,
+) -> pd.DataFrame:
     """Checks the given results for parity and throws away all of the runs that
     don't pass the parity test.
 
@@ -174,9 +172,7 @@ def process_results(mapping: Dict[cirq.Qid, cirq.Qid],
 
     """
     # The circuit's mapping from physical qubit to logical qubit.
-    inverse_mapping: Dict[cirq.Qid, cirq.Qid] = {
-        v: k for k, v in mapping.items()
-    }
+    inverse_mapping: Dict[cirq.Qid, cirq.Qid] = {v: k for k, v in mapping.items()}
 
     # Calculate all the invalid parity pairs.
     data = trial_result.data
@@ -185,8 +181,8 @@ def process_results(mapping: Dict[cirq.Qid, cirq.Qid],
         if original_qubit in parity_mapping:
             final_parity_qubit = inverse_mapping[parity_mapping[original_qubit]]
             mismatches = np.nonzero(
-                np.atleast_1d(
-                    data[str(final_qubit)] == data[str(final_parity_qubit)]))
+                np.atleast_1d(data[str(final_qubit)] == data[str(final_parity_qubit)])
+            )
             bad_measurements.update(*mismatches)
 
     # Remove the parity qubits from the measurements.
@@ -206,26 +202,26 @@ class SwapPermutationReplacer(cirq.PointOptimizer):
     def __init__(self):
         super().__init__()
 
-    def optimization_at(self, circuit: cirq.Circuit, index: int,
-                        op: cirq.Operation
-                       ) -> Optional[cirq.PointOptimizationSummary]:
+    def optimization_at(
+        self, circuit: cirq.Circuit, index: int, op: cirq.Operation
+    ) -> Optional[cirq.PointOptimizationSummary]:
         if isinstance(op.gate, cirq.contrib.acquaintance.SwapPermutationGate):
             new_ops = op.gate.swap_gate.on(*op.qubits)
-            return cirq.PointOptimizationSummary(clear_span=1,
-                                                 clear_qubits=op.qubits,
-                                                 new_operations=new_ops)
+            return cirq.PointOptimizationSummary(
+                clear_span=1, clear_qubits=op.qubits, new_operations=new_ops
+            )
         return None  # Don't make changes to other gates.
 
 
 def compile_circuit(
-        circuit: cirq.Circuit,
-        *,
-        device_graph: nx.Graph,
-        routing_attempts: int,
-        compiler: Callable[[cirq.Circuit], cirq.Circuit] = None,
-        routing_algo_name: Optional[str] = None,
-        router: Optional[Callable[..., ccr.SwapNetwork]] = None,
-        add_readout_error_correction=False,
+    circuit: cirq.Circuit,
+    *,
+    device_graph: nx.Graph,
+    routing_attempts: int,
+    compiler: Callable[[cirq.Circuit], cirq.Circuit] = None,
+    routing_algo_name: Optional[str] = None,
+    router: Optional[Callable[..., ccr.SwapNetwork]] = None,
+    add_readout_error_correction=False,
 ) -> CompilationResult:
     """Compile the given model circuit onto the given device graph. This uses a
     different compilation method than described in
@@ -279,17 +275,17 @@ def compile_circuit(
 
     swap_networks: List[ccr.SwapNetwork] = []
     for _ in range(routing_attempts):
-        swap_network = ccr.route_circuit(compiled_circuit,
-                                         device_graph,
-                                         router=router,
-                                         algo_name=routing_algo_name)
+        swap_network = ccr.route_circuit(
+            compiled_circuit, device_graph, router=router, algo_name=routing_algo_name
+        )
         swap_networks.append(swap_network)
     assert len(swap_networks) > 0, 'Unable to get routing for circuit'
 
     # Sort by the least number of qubits first (as routing sometimes adds extra
     # ancilla qubits), and then the length of the circuit second.
-    swap_networks.sort(key=lambda swap_network: (len(
-        swap_network.circuit.all_qubits()), len(swap_network.circuit)))
+    swap_networks.sort(
+        key=lambda swap_network: (len(swap_network.circuit.all_qubits()), len(swap_network.circuit))
+    )
 
     routed_circuit = swap_networks[0].circuit
     mapping = swap_networks[0].final_mapping()
@@ -298,18 +294,16 @@ def compile_circuit(
     SwapPermutationReplacer().optimize_circuit(routed_circuit)
 
     if not compiler:
-        return CompilationResult(circuit=routed_circuit,
-                                 mapping=mapping,
-                                 parity_map=parity_map)
+        return CompilationResult(circuit=routed_circuit, mapping=mapping, parity_map=parity_map)
 
     # Compile. This should decompose the routed circuit down to a gate set that
     # our device supports, and then optimize. The paper uses various
     # compiling techniques - because Quantum Volume is intended to test those
     # as well, we allow this to be passed in. This compiler is not allowed to
     # change the order of the qubits.
-    return CompilationResult(circuit=compiler(swap_networks[0].circuit),
-                             mapping=mapping,
-                             parity_map=parity_map)
+    return CompilationResult(
+        circuit=compiler(swap_networks[0].circuit), mapping=mapping, parity_map=parity_map
+    )
 
 
 @dataclass
@@ -318,6 +312,7 @@ class QuantumVolumeResult:
     quantum volume benchmark so it may be analyzed in detail afterwards.
 
     """
+
     # The model circuit used.
     model_circuit: cirq.Circuit
     # The heavy set computed from the above model circuit.
@@ -329,17 +324,17 @@ class QuantumVolumeResult:
     sampler_result: float
 
     def _json_dict_(self):
-        return cirq.protocols.obj_to_dict_helper(self, [
-            'model_circuit', 'heavy_set', 'compiled_circuit', 'sampler_result'
-        ])
+        return cirq.protocols.obj_to_dict_helper(
+            self, ['model_circuit', 'heavy_set', 'compiled_circuit', 'sampler_result']
+        )
 
 
 def prepare_circuits(
-        *,
-        num_qubits: int,
-        depth: int,
-        num_circuits: int,
-        random_state: 'cirq.RANDOM_STATE_OR_SEED_LIKE' = None,
+    *,
+    num_qubits: int,
+    depth: int,
+    num_circuits: int,
+    random_state: 'cirq.RANDOM_STATE_OR_SEED_LIKE' = None,
 ) -> List[Tuple[cirq.Circuit, List[int]]]:
     """Generates circuits and computes their heavy set.
 
@@ -356,9 +351,7 @@ def prepare_circuits(
     circuits = []
     print("Computing heavy sets")
     for circuit_i in range(num_circuits):
-        model_circuit = generate_model_circuit(num_qubits,
-                                               depth,
-                                               random_state=random_state)
+        model_circuit = generate_model_circuit(num_qubits, depth, random_state=random_state)
         heavy_set = compute_heavy_set(model_circuit)
         print(f"  Circuit {circuit_i + 1} Heavy Set: {heavy_set}")
         circuits.append((model_circuit, heavy_set))
@@ -366,14 +359,14 @@ def prepare_circuits(
 
 
 def execute_circuits(
-        *,
-        device_graph: nx.Graph,
-        samplers: List[cirq.Sampler],
-        circuits: List[Tuple[cirq.Circuit, List[int]]],
-        routing_attempts: int,
-        compiler: Callable[[cirq.Circuit], cirq.Circuit] = None,
-        repetitions: int = 10_000,
-        add_readout_error_correction=False,
+    *,
+    device_graph: nx.Graph,
+    samplers: List[cirq.Sampler],
+    circuits: List[Tuple[cirq.Circuit, List[int]]],
+    routing_attempts: int,
+    compiler: Callable[[cirq.Circuit], cirq.Circuit] = None,
+    repetitions: int = 10_000,
+    add_readout_error_correction=False,
 ) -> List[QuantumVolumeResult]:
     """Executes the given circuits on the given samplers.
 
@@ -404,7 +397,9 @@ def execute_circuits(
                 device_graph=device_graph,
                 compiler=compiler,
                 routing_attempts=routing_attempts,
-                add_readout_error_correction=add_readout_error_correction))
+                add_readout_error_correction=add_readout_error_correction,
+            )
+        )
 
     # Next, run the compiled circuits on each sampler.
     results = []
@@ -413,31 +408,53 @@ def execute_circuits(
         print(f"  Running sampler #{sampler_i + 1}")
         for circuit_i, compilation_result in enumerate(compiled_circuits):
             model_circuit, heavy_set = circuits[circuit_i]
-            prob = sample_heavy_set(compilation_result,
-                                    heavy_set,
-                                    repetitions=repetitions,
-                                    sampler=sampler)
+            prob = sample_heavy_set(
+                compilation_result, heavy_set, repetitions=repetitions, sampler=sampler
+            )
             print(f"    Compiled HOG probability #{circuit_i + 1}: {prob}")
             results.append(
-                QuantumVolumeResult(model_circuit=model_circuit,
-                                    heavy_set=heavy_set,
-                                    compiled_circuit=compilation_result.circuit,
-                                    sampler_result=prob))
+                QuantumVolumeResult(
+                    model_circuit=model_circuit,
+                    heavy_set=heavy_set,
+                    compiled_circuit=compilation_result.circuit,
+                    sampler_result=prob,
+                )
+            )
     return results
 
 
+def _get_device_graph(device_or_qubits: Any):
+    qubits = device_or_qubits if isinstance(device_or_qubits, list) else device_or_qubits.qubits
+    return ccr.gridqubits_to_graph_device(qubits)
+
+
+@deprecated_parameter(
+    deadline="v0.12",
+    fix="use device_graph instead",
+    parameter_desc='device_or_qubits',
+    match=lambda args, kwargs: 'device_or_qubits' in kwargs,
+    rewrite=lambda args, kwargs: (
+        args,
+        dict(
+            ('device_graph', _get_device_graph(arg_val))
+            if arg_name == 'device_or_qubits'
+            else (arg_name, arg_val)
+            for arg_name, arg_val in kwargs.items()
+        ),
+    ),
+)
 def calculate_quantum_volume(
-        *,
-        num_qubits: int,
-        depth: int,
-        num_circuits: int,
-        device_or_qubits: Union[cirq.google.XmonDevice, List[cirq.GridQubit]],
-        samplers: List[cirq.Sampler],
-        random_state: 'cirq.RANDOM_STATE_OR_SEED_LIKE' = None,
-        compiler: Callable[[cirq.Circuit], cirq.Circuit] = None,
-        repetitions=10_000,
-        routing_attempts=30,
-        add_readout_error_correction=False,
+    *,
+    num_qubits: int,
+    depth: int,
+    num_circuits: int,
+    device_graph: nx.Graph,
+    samplers: List[cirq.Sampler],
+    random_state: 'cirq.RANDOM_STATE_OR_SEED_LIKE' = None,
+    compiler: Callable[[cirq.Circuit], cirq.Circuit] = None,
+    repetitions=10_000,
+    routing_attempts=30,
+    add_readout_error_correction=False,
 ) -> List[QuantumVolumeResult]:
     """Run the quantum volume algorithm.
 
@@ -453,8 +470,8 @@ def calculate_quantum_volume(
         depth: The number of gate layers to generate.
         num_circuits: The number of random circuits to run.
         random_state: Random state or random state seed.
-        device_or_qubits: The device or the device qubits to run the compiled
-            circuit on.
+        device_graph: A graph whose nodes are qubits and edges represent two qubit interactions to
+            run the compiled circuit on.
         samplers: The samplers to run the algorithm on.
         compiler: An optional function to compiler the model circuit's
             gates down to the target devices gate set and the optimize it.
@@ -473,17 +490,9 @@ def calculate_quantum_volume(
         for running the algorithm and its results.
 
     """
-    circuits = prepare_circuits(num_qubits=num_qubits,
-                                depth=depth,
-                                num_circuits=num_circuits,
-                                random_state=random_state)
-
-    # Get the device graph from the given qubits or device.
-    device_graph = None
-    if isinstance(device_or_qubits, list):
-        device_graph = ccr.gridqubits_to_graph_device(device_or_qubits)
-    else:
-        device_graph = ccr.xmon_device_to_graph(device_or_qubits)
+    circuits = prepare_circuits(
+        num_qubits=num_qubits, depth=depth, num_circuits=num_circuits, random_state=random_state
+    )
 
     return execute_circuits(
         circuits=circuits,

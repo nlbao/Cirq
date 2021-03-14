@@ -12,4 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Visualization utilities."""
+
 from cirq.vis.heatmap import Heatmap
+from cirq.vis.heatmap import TwoQubitInteractionHeatmap
+
+from cirq.vis.vis_utils import relative_luminance

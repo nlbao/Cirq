@@ -14,6 +14,8 @@
 
 """Workarounds for compatibility issues between versions and libraries."""
 import functools
+import os
+import re
 import warnings
 from typing import Any, Callable, Optional, Dict, Tuple, Type
 from types import ModuleType
@@ -31,35 +33,37 @@ def proper_repr(value: Any) -> str:
 
         # HACK: work around https://github.com/sympy/sympy/issues/16074
         # (only handles a few cases)
-        fixed_tokens = [
-            'Symbol', 'pi', 'Mul', 'Pow', 'Add', 'Mod', 'Integer', 'Float',
-            'Rational'
-        ]
+        fixed_tokens = ['Symbol', 'pi', 'Mul', 'Pow', 'Add', 'Mod', 'Integer', 'Float', 'Rational']
         for token in fixed_tokens:
             result = result.replace(token, 'sympy.' + token)
 
         return result
 
     if isinstance(value, np.ndarray):
-        return 'np.array({!r}, dtype=np.{})'.format(value.tolist(), value.dtype)
+        if np.issubdtype(value.dtype, np.datetime64):
+            return f'np.array({value.tolist()!r}, dtype=np.{value.dtype!r})'
+        return f'np.array({value.tolist()!r}, dtype=np.{value.dtype})'
 
     if isinstance(value, pd.MultiIndex):
-        return (f'pd.MultiIndex.from_tuples({repr(list(value))}, '
-                f'names={repr(list(value.names))})')
+        return f'pd.MultiIndex.from_tuples({repr(list(value))}, names={repr(list(value.names))})'
 
     if isinstance(value, pd.Index):
-        return (f'pd.Index({repr(list(value))}, '
-                f'name={repr(value.name)}, '
-                f'dtype={repr(str(value.dtype))})')
+        return (
+            f'pd.Index({repr(list(value))}, '
+            f'name={repr(value.name)}, '
+            f'dtype={repr(str(value.dtype))})'
+        )
 
     if isinstance(value, pd.DataFrame):
         cols = [value[col].tolist() for col in value.columns]
         rows = list(zip(*cols))
-        return (f'pd.DataFrame('
-                f'\n    columns={proper_repr(value.columns)}, '
-                f'\n    index={proper_repr(value.index)}, '
-                f'\n    data={repr(rows)}'
-                f'\n)')
+        return (
+            f'pd.DataFrame('
+            f'\n    columns={proper_repr(value.columns)}, '
+            f'\n    index={proper_repr(value.index)}, '
+            f'\n    data={repr(rows)}'
+            f'\n)'
+        )
 
     return repr(value)
 
@@ -77,17 +81,38 @@ def proper_eq(a: Any, b: Any) -> bool:
         if isinstance(a, (pd.DataFrame, pd.Index, pd.MultiIndex)):
             return a.equals(b)
         if isinstance(a, (tuple, list)):
-            return len(a) == len(b) and all(
-                proper_eq(x, y) for x, y in zip(a, b))
+            return len(a) == len(b) and all(proper_eq(x, y) for x, y in zip(a, b))
     return a == b
 
 
-def deprecated(*, deadline: str, fix: str,
-               name: Optional[str] = None) -> Callable[[Callable], Callable]:
+def _warn_or_error(msg):
+    from cirq.testing.deprecation import ALLOW_DEPRECATION_IN_TEST
+
+    called_from_test = 'PYTEST_CURRENT_TEST' in os.environ
+    deprecation_allowed = ALLOW_DEPRECATION_IN_TEST in os.environ
+    if called_from_test and not deprecation_allowed:
+        raise ValueError(f"Cirq should not use deprecated functionality: {msg}")
+
+    warnings.warn(
+        msg,
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
+
+def _validate_deadline(deadline: str):
+    DEADLINE_REGEX = r"^v(\d)+\.(\d)+$"
+    assert re.match(DEADLINE_REGEX, deadline), "deadline should match vX.Y"
+
+
+def deprecated(
+    *, deadline: str, fix: str, name: Optional[str] = None
+) -> Callable[[Callable], Callable]:
     """Marks a function as deprecated.
 
     Args:
-        deadline: The version where the function will be deleted (e.g. "v0.7").
+        deadline: The version where the function will be deleted. It should be a minor version
+            (e.g. "v0.7").
         fix: A complete sentence describing what the user should be using
             instead of this particular function (e.g. "Use cos instead.")
         name: How to refer to the function.
@@ -96,18 +121,17 @@ def deprecated(*, deadline: str, fix: str,
     Returns:
         A decorator that decorates functions with a deprecation warning.
     """
+    _validate_deadline(deadline)
 
     def decorator(func: Callable) -> Callable:
-
         @functools.wraps(func)
         def decorated_func(*args, **kwargs) -> Any:
-            qualname = (func.__qualname__ if name is None else name)
-            warnings.warn(
+            qualname = func.__qualname__ if name is None else name
+            _warn_or_error(
                 f'{qualname} was used but is deprecated.\n'
                 f'It will be removed in cirq {deadline}.\n'
-                f'{fix}\n',
-                DeprecationWarning,
-                stacklevel=2)
+                f'{fix}\n'
+            )
 
             return func(*args, **kwargs)
 
@@ -115,19 +139,22 @@ def deprecated(*, deadline: str, fix: str,
             f'THIS FUNCTION IS DEPRECATED.\n\n'
             f'IT WILL BE REMOVED IN `cirq {deadline}`.\n\n'
             f'{fix}\n\n'
-            f'{decorated_func.__doc__ or ""}')
+            f'{decorated_func.__doc__ or ""}'
+        )
 
         return decorated_func
 
     return decorator
 
 
-def deprecated_class(*, deadline: str, fix: str,
-                     name: Optional[str] = None) -> Callable[[Type], Type]:
+def deprecated_class(
+    *, deadline: str, fix: str, name: Optional[str] = None
+) -> Callable[[Type], Type]:
     """Marks a class as deprecated.
 
     Args:
-        deadline: The version where the function will be deleted (e.g. "v0.7").
+        deadline: The version where the function will be deleted. It should be a minor version
+            (e.g. "v0.7").
         fix: A complete sentence describing what the user should be using
             instead of this particular function (e.g. "Use cos instead.")
         name: How to refer to the class.
@@ -137,25 +164,28 @@ def deprecated_class(*, deadline: str, fix: str,
         A decorator that decorates classes with a deprecation warning.
     """
 
+    _validate_deadline(deadline)
+
     def decorator(clazz: Type) -> Type:
         clazz_new = clazz.__new__
 
         def patched_new(cls, *args, **kwargs):
-            qualname = (clazz.__qualname__ if name is None else name)
-            warnings.warn(
+            qualname = clazz.__qualname__ if name is None else name
+            _warn_or_error(
                 f'{qualname} was used but is deprecated.\n'
                 f'It will be removed in cirq {deadline}.\n'
-                f'{fix}\n',
-                DeprecationWarning,
-                stacklevel=2)
+                f'{fix}\n'
+            )
 
             return clazz_new(cls)
 
         setattr(clazz, '__new__', patched_new)
-        clazz.__doc__ = (f'THIS CLASS IS DEPRECATED.\n\n'
-                         f'IT WILL BE REMOVED IN `cirq {deadline}`.\n\n'
-                         f'{fix}\n\n'
-                         f'{clazz.__doc__ or ""}')
+        clazz.__doc__ = (
+            f'THIS CLASS IS DEPRECATED.\n\n'
+            f'IT WILL BE REMOVED IN `cirq {deadline}`.\n\n'
+            f'{fix}\n\n'
+            f'{clazz.__doc__ or ""}'
+        )
 
         return clazz
 
@@ -163,22 +193,23 @@ def deprecated_class(*, deadline: str, fix: str,
 
 
 def deprecated_parameter(
-        *,
-        deadline: str,
-        fix: str,
-        func_name: Optional[str] = None,
-        parameter_desc: str,
-        match: Callable[[Tuple[Any, ...], Dict[str, Any]], bool],
-        rewrite: Optional[
-            Callable[[Tuple[Any, ...], Dict[str, Any]],
-                     Tuple[Tuple[Any, ...], Dict[str, Any]]]] = None,
+    *,
+    deadline: str,
+    fix: str,
+    func_name: Optional[str] = None,
+    parameter_desc: str,
+    match: Callable[[Tuple[Any, ...], Dict[str, Any]], bool],
+    rewrite: Optional[
+        Callable[[Tuple[Any, ...], Dict[str, Any]], Tuple[Tuple[Any, ...], Dict[str, Any]]]
+    ] = None,
 ) -> Callable[[Callable], Callable]:
     """Marks a function parameter as deprecated.
 
     Also handles rewriting the deprecated parameter into the new signature.
 
     Args:
-        deadline: The version where the parameter will be deleted (e.g. "v0.7").
+        deadline: The version where the function will be deleted. It should be a minor version
+            (e.g. "v0.7").
         fix: A complete sentence describing what the user should be using
             instead of this particular function (e.g. "Use cos instead.")
         func_name: How to refer to the function.
@@ -197,24 +228,22 @@ def deprecated_parameter(
         A decorator that decorates functions with a parameter deprecation
             warning.
     """
+    _validate_deadline(deadline)
 
     def decorator(func: Callable) -> Callable:
-
         @functools.wraps(func)
         def decorated_func(*args, **kwargs) -> Any:
             if match(args, kwargs):
                 if rewrite is not None:
                     args, kwargs = rewrite(args, kwargs)
 
-                qualname = (func.__qualname__
-                            if func_name is None else func_name)
-                warnings.warn(
+                qualname = func.__qualname__ if func_name is None else func_name
+                _warn_or_error(
                     f'The {parameter_desc} parameter of {qualname} was '
                     f'used but is deprecated.\n'
                     f'It will be removed in cirq {deadline}.\n'
                     f'{fix}\n',
-                    DeprecationWarning,
-                    stacklevel=2)
+                )
 
             return func(*args, **kwargs)
 
@@ -223,8 +252,7 @@ def deprecated_parameter(
     return decorator
 
 
-def wrap_module(module: ModuleType,
-                deprecated_attributes: Dict[str, Tuple[str, str]]):
+def deprecate_attributes(module: ModuleType, deprecated_attributes: Dict[str, Tuple[str, str]]):
     """Wrap a module with deprecated attributes that give warnings.
 
     Args:
@@ -239,6 +267,9 @@ def wrap_module(module: ModuleType,
         will cause a warning for these deprecated attributes.
     """
 
+    for (deadline, _) in deprecated_attributes.values():
+        _validate_deadline(deadline)
+
     class Wrapped(ModuleType):
 
         __dict__ = module.__dict__
@@ -246,12 +277,11 @@ def wrap_module(module: ModuleType,
         def __getattr__(self, name):
             if name in deprecated_attributes:
                 deadline, fix = deprecated_attributes[name]
-                warnings.warn(
+                _warn_or_error(
                     f'{name} was used but is deprecated.\n'
                     f'It will be removed in cirq {deadline}.\n'
-                    f'{fix}\n',
-                    DeprecationWarning,
-                    stacklevel=2)
+                    f'{fix}\n'
+                )
             return getattr(module, name)
 
     return Wrapped(module.__name__, module.__doc__)

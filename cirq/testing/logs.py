@@ -14,14 +14,15 @@
 """Helper for testing python logging statements."""
 
 import logging
-from typing import ContextManager, List
+from typing import ContextManager, List, Optional
 
 
-def assert_logs(*matches: str,
-                count: int = 1,
-                level: int = logging.WARNING,
-                capture_warnings: bool = True
-               ) -> ContextManager[List[logging.LogRecord]]:
+def assert_logs(
+    *matches: str,
+    count: Optional[int] = 1,
+    level: int = logging.WARNING,
+    capture_warnings: bool = True,
+) -> ContextManager[List[logging.LogRecord]]:
     """A context manager for testing logging and warning events.
 
     To use this one wraps the code that is to be tested for log events within
@@ -39,7 +40,8 @@ def assert_logs(*matches: str,
     Args:
         matches: Each of these is checked to see if they match, as a substring,
             any of the captures log messages.
-        count: The expected number of messages in logs. Defaults to 1.
+        count: The expected number of messages in logs. Defaults to 1. If None is passed in counts
+            are not checked.
         level: The level at which to capture the logs. See the python logging
             module for valid levels. By default this captures at the
             `logging.WARNING` level, so this does not capture `logging.INFO`
@@ -55,7 +57,6 @@ def assert_logs(*matches: str,
     records = []
 
     class Handler(logging.Handler):
-
         def emit(self, record):
             records.append(record)
 
@@ -70,12 +71,15 @@ def assert_logs(*matches: str,
             logging.getLogger().removeHandler(self)
             if capture_warnings:
                 logging.captureWarnings(False)
-            assert len(records) == count, (
-                f'Expected {count} log message but got {len(records)}.')
             msgs = [record.getMessage() for record in records]
+
+            assert count is None or len(records) == count, (
+                f'Expected {count} log message but ' f'got {len(records)}. Log messages: ' f'{msgs}'
+            )
             for match in matches:
                 assert match in ''.join(msgs), (
                     f'{match} expected to appear in log messages but it was '
-                    f'not found. Logs messages: {msgs}.')
+                    f'not found. Log messages: {msgs}.'
+                )
 
     return Handler()

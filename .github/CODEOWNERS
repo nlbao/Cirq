@@ -4,6 +4,9 @@
 
 **/ionq/**/*.* @dabacon @ColemanCollins @nakardo @gmauricio @quantumlib/cirq-maintainers @vtomole @cduck
 
-**/aqt/**/*.* @ma5x @pschindler @quantumlib/cirq-maintainers @vtomole @cduck
+**/aqt/**/*.* @ma5x @pschindler @alfrisch @quantumlib/cirq-maintainers @vtomole @cduck
 
 **/pasqal/**/*.* @HGSilveri @quantumlib/cirq-maintainers @vtomole @cduck
+
+cirq/experiments/**/*.* @mrwojtek @quantumlib/cirq-maintainers @vtomole @cduck
+cirq/docs/qcvv/**/*.* @mrwojtek @quantumlib/cirq-maintainers @vtomole @cduck
